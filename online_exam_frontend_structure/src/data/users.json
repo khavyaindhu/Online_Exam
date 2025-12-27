@@ -1,0 +1,20 @@
+[
+  {
+    "userId": "ADM001",
+    "password": "admin123",
+    "name": "Admin User",
+    "role": "admin"
+  },
+  {
+    "userId": "TCH001",
+    "password": "teacher123",
+    "name": "John Teacher",
+    "role": "teacher"
+  },
+  {
+    "userId": "STU001",
+    "password": "student123",
+    "name": "Jane Student",
+    "role": "student"
+  }
+]
