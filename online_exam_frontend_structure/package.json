@@ -1,0 +1,9 @@
+{
+  "name": "online-exam-frontend",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "start": "vite",
+    "build": "vite build"
+  }
+}

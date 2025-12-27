@@ -1,0 +1,13 @@
+[
+  {
+    "id": 1,
+    "question": "What is React?",
+    "options": [
+      "Library",
+      "Framework",
+      "Language",
+      "Database"
+    ],
+    "answer": "Library"
+  }
+]
