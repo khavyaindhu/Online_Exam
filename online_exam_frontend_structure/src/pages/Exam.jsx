@@ -1,63 +1,55 @@
 import { useState, useEffect, useRef } from 'react';
+import { useAntiCheating, ProctoringOverlay } from './useAntiCheating';
 
 export default function Exam({ exam, currentUser, onExamComplete, onExit }) {
   const [timeRemaining, setTimeRemaining] = useState(exam.duration * 60);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [answers, setAnswers] = useState({});
-  const [tabSwitches, setTabSwitches] = useState(0);
   const [showSubmitModal, setShowSubmitModal] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showFullscreenPrompt, setShowFullscreenPrompt] = useState(true);
   const startTime = useRef(Date.now());
-  const examStarted = useRef(false);
 
-  // Anti-Cheating: Disable right-click, copy, paste
+  // ============================================================================
+  // ANTI-CHEATING INTEGRATION
+  // ============================================================================
+  const antiCheating = useAntiCheating({
+    maxWarnings: 5,
+    autoSubmitOnMaxWarnings: true,
+    onTabSwitch: (count) => {
+      console.log(`Tab switch detected. Total: ${count}`);
+    },
+    onCopyAttempt: (count) => {
+      console.log(`Copy attempt detected. Total: ${count}`);
+    },
+    onPasteAttempt: (count) => {
+      console.log(`Paste attempt detected. Total: ${count}`);
+    },
+    onDevToolsDetected: (count) => {
+      console.log(`DevTools detected. Total: ${count}`);
+    },
+    onFullscreenExit: (count) => {
+      console.log(`Fullscreen exited. Total: ${count}`);
+    },
+    onAutoSubmit: (reason) => {
+      alert(`⚠️ ${reason}`);
+      handleAutoSubmit();
+    },
+    enabled: true
+  });
+
+  const { 
+    violations, 
+    totalViolations, 
+    isFullscreen, 
+    requestFullscreen,
+    WarningModal 
+  } = antiCheating;
+
+  // ============================================================================
+  // TIMER COUNTDOWN
+  // ============================================================================
   useEffect(() => {
-    const handleContextMenu = (e) => e.preventDefault();
-    const handleCopy = (e) => e.preventDefault();
-    const handlePaste = (e) => e.preventDefault();
-    const handleCut = (e) => e.preventDefault();
-
-    document.addEventListener('contextmenu', handleContextMenu);
-    document.addEventListener('copy', handleCopy);
-    document.addEventListener('paste', handlePaste);
-    document.addEventListener('cut', handleCut);
-
-    return () => {
-      document.removeEventListener('contextmenu', handleContextMenu);
-      document.removeEventListener('copy', handleCopy);
-      document.removeEventListener('paste', handlePaste);
-      document.removeEventListener('cut', handleCut);
-    };
-  }, []);
-
-  // Anti-Cheating: Detect tab switching and visibility changes
-  useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (document.hidden && examStarted.current) {
-        setTabSwitches(prev => prev + 1);
-        alert('⚠️ Warning: Tab switching detected! This will be reported.');
-      }
-    };
-
-    const handleBlur = () => {
-      if (examStarted.current) {
-        setTabSwitches(prev => prev + 1);
-      }
-    };
-
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    window.addEventListener('blur', handleBlur);
-
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('blur', handleBlur);
-    };
-  }, []);
-
-  // Timer countdown
-  useEffect(() => {
-    examStarted.current = true;
-
     const timer = setInterval(() => {
       setTimeRemaining(prev => {
         if (prev <= 1) {
@@ -79,7 +71,9 @@ export default function Exam({ exam, currentUser, onExamComplete, onExit }) {
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  // Handle answer change
+  // ============================================================================
+  // ANSWER HANDLING
+  // ============================================================================
   const handleAnswerChange = (questionId, answer) => {
     setAnswers(prev => ({
       ...prev,
@@ -87,14 +81,15 @@ export default function Exam({ exam, currentUser, onExamComplete, onExit }) {
     }));
   };
 
-  // Auto-submit when time expires
+  // ============================================================================
+  // EXAM SUBMISSION
+  // ============================================================================
   const handleAutoSubmit = () => {
     if (!isSubmitting) {
       submitExam(true);
     }
   };
 
-  // Submit exam
   const submitExam = (autoSubmit = false) => {
     setIsSubmitting(true);
     const endTime = Date.now();
@@ -116,26 +111,25 @@ export default function Exam({ exam, currentUser, onExamComplete, onExit }) {
         earnedMarks = isCorrect ? question.marks : 0;
         totalScore += earnedMarks;
       } else if (question.type === 'short') {
-        // Manual grading needed
-        earnedMarks = 0; // Will be graded manually
+        earnedMarks = 0;
       }
 
       detailedAnswers.push({
         questionId: question.id,
         question: question.question,
         type: question.type,
-        userAnswer: userAnswer,
+        answer: userAnswer,
         correctAnswer: question.correctAnswer,
         isCorrect: isCorrect,
         marks: question.marks,
-        earnedMarks: earnedMarks
+        obtainedMarks: earnedMarks
       });
     });
 
     const percentage = maxScore > 0 ? ((totalScore / maxScore) * 100).toFixed(2) : 0;
     const passed = totalScore >= exam.passingMarks;
 
-    // Save result
+    // Save result with ALL violation data
     const result = {
       id: `result_${Date.now()}`,
       examId: exam.id,
@@ -146,24 +140,30 @@ export default function Exam({ exam, currentUser, onExamComplete, onExit }) {
       obtainedMarks: totalScore,
       percentage: percentage,
       passed: passed,
+      passingMarks: exam.passingMarks,
       timeTaken: timeTaken,
-      tabSwitches: tabSwitches,
+      tabSwitches: violations.tabSwitches,
+      copyAttempts: violations.copyAttempts,
+      pasteAttempts: violations.pasteAttempts,
+      devToolsDetections: violations.devToolsDetections,
+      fullscreenExits: violations.fullscreenExits,
+      totalViolations: totalViolations,
       submittedAt: new Date().toISOString(),
       autoSubmit: autoSubmit,
       answers: detailedAnswers
     };
 
-    // Store result in localStorage
-    const storedResults = localStorage.getItem('examResults');
-    const allResults = storedResults ? JSON.parse(storedResults) : [];
+    const storedResults = localStorage.getItem('examResults') || '[]';
+    const allResults = JSON.parse(storedResults);
     allResults.push(result);
     localStorage.setItem('examResults', JSON.stringify(allResults));
 
-    // Call onExamComplete callback
     onExamComplete(result);
   };
 
-  // Navigate questions
+  // ============================================================================
+  // NAVIGATION
+  // ============================================================================
   const goToQuestion = (index) => {
     setCurrentQuestionIndex(index);
   };
@@ -180,10 +180,109 @@ export default function Exam({ exam, currentUser, onExamComplete, onExit }) {
     }
   };
 
+  // ============================================================================
+  // START EXAM (FULLSCREEN PROMPT)
+  // ============================================================================
+  const startExamWithFullscreen = () => {
+    requestFullscreen();
+    setShowFullscreenPrompt(false);
+  };
+
+  const startExamWithoutFullscreen = () => {
+    setShowFullscreenPrompt(false);
+  };
+
+  // ============================================================================
+  // RENDER: FULLSCREEN PROMPT
+  // ============================================================================
+  if (showFullscreenPrompt) {
+    return (
+      <div style={{
+        minHeight: '100vh',
+        background: 'linear-gradient(135deg, #1a202c 0%, #2d3748 100%)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '20px'
+      }}>
+        <div style={{
+          backgroundColor: '#1a202c',
+          padding: '40px',
+          borderRadius: '20px',
+          border: '1px solid #4a5568',
+          maxWidth: '600px',
+          width: '100%',
+          textAlign: 'center'
+        }}>
+          <div style={{ fontSize: '64px', marginBottom: '20px' }}>🔒</div>
+          <h1 style={{ color: '#fff', fontSize: '28px', marginBottom: '16px' }}>
+            Anti-Cheating Measures Active
+          </h1>
+          <p style={{ color: '#a0aec0', fontSize: '16px', marginBottom: '24px', lineHeight: '1.6' }}>
+            This exam has strict proctoring enabled. The following actions are monitored:
+          </p>
+          <div style={{
+            textAlign: 'left',
+            backgroundColor: 'rgba(45, 55, 72, 0.6)',
+            padding: '20px',
+            borderRadius: '12px',
+            marginBottom: '24px'
+          }}>
+            <ul style={{ color: '#cbd5e0', fontSize: '14px', lineHeight: '2', margin: 0, paddingLeft: '20px' }}>
+              <li>🔄 <strong>Tab switching</strong> will be tracked</li>
+              <li>📋 <strong>Copy/paste</strong> operations are disabled</li>
+              <li>🔧 <strong>Developer tools</strong> are blocked</li>
+              <li>📱 <strong>Window focus loss</strong> will be logged</li>
+              <li>⚠️ <strong>Maximum 5 warnings</strong> before auto-submission</li>
+            </ul>
+          </div>
+          <p style={{ color: '#ed8936', fontSize: '14px', marginBottom: '24px', fontWeight: '600' }}>
+            ⚠️ We recommend using fullscreen mode for the best experience
+          </p>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+            <button
+              onClick={startExamWithoutFullscreen}
+              style={{
+                padding: '16px',
+                backgroundColor: 'rgba(45, 55, 72, 0.6)',
+                color: '#a0aec0',
+                border: '1px solid #4a5568',
+                borderRadius: '12px',
+                cursor: 'pointer',
+                fontWeight: '600',
+                fontSize: '14px'
+              }}
+            >
+              Start Without Fullscreen
+            </button>
+            <button
+              onClick={startExamWithFullscreen}
+              style={{
+                padding: '16px',
+                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                color: 'white',
+                border: 'none',
+                borderRadius: '12px',
+                cursor: 'pointer',
+                fontWeight: '600',
+                fontSize: '14px'
+              }}
+            >
+              🚀 Start with Fullscreen
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ============================================================================
+  // RENDER: EXAM INTERFACE
+  // ============================================================================
   const currentQuestion = exam.questions[currentQuestionIndex];
   const progress = ((currentQuestionIndex + 1) / exam.questions.length) * 100;
   const answeredCount = Object.keys(answers).length;
-  const isLowTime = timeRemaining < 300; // Less than 5 minutes
+  const isLowTime = timeRemaining < 300;
 
   return (
     <div style={{
@@ -192,6 +291,16 @@ export default function Exam({ exam, currentUser, onExamComplete, onExit }) {
       padding: '0',
       userSelect: 'none'
     }}>
+      {/* Warning Toast */}
+      <WarningModal />
+
+      {/* Proctoring Overlay */}
+      <ProctoringOverlay 
+        violations={violations}
+        maxWarnings={5}
+        onForceExit={handleAutoSubmit}
+      />
+
       {/* Fixed Header */}
       <div style={{
         position: 'sticky',
@@ -249,8 +358,8 @@ export default function Exam({ exam, currentUser, onExamComplete, onExit }) {
               </span>
             </div>
 
-            {/* Tab Switches Warning */}
-            {tabSwitches > 0 && (
+            {/* Total Violations */}
+            {totalViolations > 0 && (
               <div style={{
                 padding: '8px 16px',
                 backgroundColor: 'rgba(229, 62, 62, 0.2)',
@@ -260,7 +369,7 @@ export default function Exam({ exam, currentUser, onExamComplete, onExit }) {
                 fontSize: '13px',
                 fontWeight: '600'
               }}>
-                ⚠️ Warnings: {tabSwitches}
+                ⚠️ Warnings: {totalViolations}
               </div>
             )}
 
@@ -661,6 +770,20 @@ export default function Exam({ exam, currentUser, onExamComplete, onExit }) {
                 </span>
               )}
             </p>
+
+            {totalViolations > 0 && (
+              <div style={{
+                padding: '12px',
+                backgroundColor: 'rgba(229, 62, 62, 0.1)',
+                border: '1px solid #fc8181',
+                borderRadius: '8px',
+                marginBottom: '16px'
+              }}>
+                <p style={{ color: '#fc8181', fontSize: '14px', margin: 0 }}>
+                  ⚠️ Total violations detected: <strong>{totalViolations}</strong>
+                </p>
+              </div>
+            )}
 
             <p style={{
               color: '#cbd5e0',
