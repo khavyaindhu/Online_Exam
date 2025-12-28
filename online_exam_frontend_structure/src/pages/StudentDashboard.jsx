@@ -1,34 +1,29 @@
 import { useState, useEffect } from 'react';
 import Exam from './Exam';
 
-export default function TeacherDashboard({ currentUser, onLogout }) {
-  const [selectedTab, setSelectedTab] = useState('overview');
-  const [showCreateExam, setShowCreateExam] = useState(false);
+export default function StudentDashboard({ currentUser, onLogout }) {
+  const [selectedTab, setSelectedTab] = useState('exams');
   const [exams, setExams] = useState([]);
   const [selectedExam, setSelectedExam] = useState(null);
-  const [results, setResults] = useState([]);
-  const [selectedResult, setSelectedResult] = useState(null);
-  const [filterExamId, setFilterExamId] = useState('all');
+  const [isInExam, setIsInExam] = useState(false);
+  const [examResult, setExamResult] = useState(null);
 
   useEffect(() => {
     loadExams();
-    loadResults();
   }, []);
 
   const loadExams = () => {
     const storedExams = localStorage.getItem('exams');
     const allExams = storedExams ? JSON.parse(storedExams) : [];
-    const myExams = allExams.filter(exam => exam.createdBy === currentUser.userId);
-    setExams(myExams);
+    const activeExams = allExams.filter(exam => exam.status === 'active');
+    setExams(activeExams);
   };
 
   const loadResults = () => {
     const storedResults = localStorage.getItem('examResults');
     const allResults = storedResults ? JSON.parse(storedResults) : [];
-    // Filter results for exams created by this teacher
-    const myExamIds = exams.map(e => e.id);
-    const myResults = allResults.filter(r => myExamIds.includes(r.examId) || exams.some(e => e.id === r.examId));
-    setResults(myResults);
+    const myResults = allResults.filter(result => result.studentId === currentUser.userId);
+    return myResults;
   };
 
   const viewExamDetails = (exam) => {
